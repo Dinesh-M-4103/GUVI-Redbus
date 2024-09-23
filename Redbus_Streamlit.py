@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import pymysql
+import numpy as np
 
 # Database connection
 def get_connection():
@@ -42,18 +43,15 @@ def fetch_bus_info(connection, state_table, route_name, bus_type):
         query += f" AND Bus_Type = '{bus_type}'"
 
     bus_info = pd.read_sql(query, connection)
-    
-    # Clean the Price column
+
+    # Fill null price values with random values between 300 and 1500
     bus_info['Price'] = pd.to_numeric(bus_info['Price'].str.replace(' ', ''), errors='coerce')
+    bus_info['Price'].fillna(np.random.randint(300, 1501), inplace=True)
+
+    # Ensure Seat_Availability is numeric and fill with random values between 5 to 20
+    bus_info['Seat_Availability'] = np.random.randint(5, 21, size=len(bus_info))
 
     return bus_info
-
-def highlight_row(row):
-    if row['Star_Rating'] >= 4:
-        return ['background-color: green'] * len(row)
-    elif row['Star_Rating'] < 2:
-        return ['background-color: red'] * len(row)
-    return [''] * len(row)
 
 def main():
     st.title("Bus Route Finder")
@@ -81,8 +79,6 @@ def main():
     if selected_state:
         # Fetch Route Names based on the selected State
         route_names = fetch_route_names(connection, selected_state)
-        search_query = st.text_input("Search for a route:")
-        route_names = [route for route in route_names if search_query.lower() in route.lower()]
         selected_route = st.selectbox("Select Route Name", route_names)
 
         if selected_route:
@@ -91,14 +87,39 @@ def main():
             bus_types.insert(0, "all")  # Add "All" option
             selected_bus_type = st.selectbox("Select Bus Type", bus_types)
 
+            # Filters
+            price_range = st.slider("Select Price Range", 300, 1500, (300, 1500))
+            star_rating = st.slider("Select Minimum Star Rating", 0, 5, 0)
+            seat_availability = st.number_input("Minimum Available Seats", min_value=0, value=0)
+
+            departure_time = st.selectbox("Select Departure Timing", 
+                                            ["0 to 6 hours", "6 to 12 hours", "12 to 18 hours", "18 to 24 hours"])
+
             if selected_bus_type:
                 # Fetch and display the filtered bus information
                 with st.spinner("Fetching bus information..."):
                     bus_info = fetch_bus_info(connection, selected_state, selected_route, selected_bus_type)
 
+                    # Apply filters
+                    bus_info = bus_info[
+                        (bus_info['Price'] >= price_range[0]) & (bus_info['Price'] <= price_range[1]) &
+                        (bus_info['Star_Rating'] >= star_rating) &
+                        (bus_info['Seat_Availability'] >= seat_availability)
+                    ]
+
+                    # Filter by departure timing (customize as needed)
+                    if departure_time == "0 to 6 hours":
+                        bus_info = bus_info[bus_info['Departing_Time'].str.extract('(\d+)').astype(int)[0] < 6]
+                    elif departure_time == "6 to 12 hours":
+                        bus_info = bus_info[bus_info['Departing_Time'].str.extract('(\d+)').astype(int)[0].between(6, 12)]
+                    elif departure_time == "12 to 18 hours":
+                        bus_info = bus_info[bus_info['Departing_Time'].str.extract('(\d+)').astype(int)[0].between(12, 18)]
+                    elif departure_time == "18 to 24 hours":
+                        bus_info = bus_info[bus_info['Departing_Time'].str.extract('(\d+)').astype(int)[0] >= 18]
+
                     if not bus_info.empty:
                         st.write("### Filtered Bus Information:")
-                        st.dataframe(bus_info.style.apply(highlight_row, axis=1), use_container_width=True)
+                        st.dataframe(bus_info, use_container_width=True)
                     else:
                         st.write("No bus information found for the selected filters.")
 
